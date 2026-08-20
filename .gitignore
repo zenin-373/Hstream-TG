@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Downloads / media
+downloads/
+*.mkv
+*.mp4
+*.webm
+*.ass
+*.srt
+*.vtt
+*.ts
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs
+*.log
+
+# Secrets – never commit these
+.env
+.env.*
+cookies.txt
+*.cookies
+*cookie*
+
+# Bot data
+data/
+user_cookies/
