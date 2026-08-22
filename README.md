@@ -1,35 +1,54 @@
 # HStream-TG
 
-Telegram bot for **hstream.moe** – bulk download + English subtitle remux.
+Telegram bot for **[hstream.moe](https://hstream.moe)** – bulk download, English subtitle remux, and leech.
 
-Built on top of [Hstream-Extractor](https://github.com/zenin-373/Hstream-Extractor) logic (yt-dlp + hanime-plugin + ffmpeg).
+Built on [Hstream-Extractor](https://github.com/zenin-373/Hstream-Extractor) logic (**yt-dlp** + **hanime-plugin** + **ffmpeg**).  
+Uploads use **[wzgram](https://github.com/rjriajul/wzgram)** (Pyrogram MTProto) so files up to ~**2 GB** can be sent (not the old Bot API ~50 MB limit).
 
 ## Features
 
-- Send one or more **single-episode** URLs → bot downloads, tries `.ass` subs, remuxes to MKV
-- Live progress messages (edits the same status bubble)
-- `/cookies` – upload Netscape cookies.txt for login-walled titles
-- Per-user download folders + `/clear`
-- `/status` – jobs & disk usage
-- Runs heavy work in a thread pool → bot stays responsive
-- Telegram file-size limit handling (~50 MB)
+- Send one or more **single-episode** URLs → download + best-effort English `.ass` + MKV remux
+- **Series card once per hentai**: poster + rich caption (Manga-DL style), then all episodes of that series
+- Multi-series batches: next series gets its own poster/caption, then its files
+- Subtitle resolve: page scrape → player API → known CDN hosts
+- Live progress status messages
+- `/cookies` – per-user Netscape `cookies.txt` for login-walled titles
+- Per-user download folders + `/clear` + `/status`
+- Heavy work in a thread pool (bot stays responsive)
+- Soft upload cap via `MAX_FILE_MB` (default **2000**)
 - Docker-ready
 
-## Limitations (same as the original extractor)
+## Limitations
 
-- **Only individual episode links** work  
+- **Only individual episode links**  
   `https://hstream.moe/hentai/title-1` ✅  
-  Series / playlist pages ❌
-- Subtitle CDNs rotate – sometimes the bot cannot find the `.ass`
-- Telegram bots cannot send files larger than ~50 MB (the file stays on the server)
+  Series / playlist pages are **not** expanded ❌
+- Subtitle CDNs rotate – subs are best-effort
+- Needs `API_ID` + `API_HASH` from [my.telegram.org](https://my.telegram.org) (wzgram / MTProto)
+
+## Caption layout (once per series)
+
+```
+📖 Title
+日本語タイトル
+
+📅 Year: 2005
+📊 Status: Completed
+📑 Total Episodes: 2
+🏷️ Tags: …
+🌐 Studio: …
+🗣 Language: Japanese + Eng subs
+```
+
+Then each episode file is leeched with a short caption (`Episode N` + filename + size).
 
 ## Quick start (local)
 
 ### 1. Requirements
 
 - Python 3.10+
-- `ffmpeg` and `aria2c` in PATH (highly recommended)
-- Deno (optional, for some hanime-plugin features)
+- `ffmpeg` and `aria2c` in PATH (recommended)
+- Deno (optional, some hanime-plugin features)
 
 ```bash
 # Debian / Ubuntu / WSL
@@ -53,10 +72,18 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env and put your BOT_TOKEN
 ```
 
-Get a token from [@BotFather](https://t.me/BotFather).
+Edit `.env`:
+
+| Variable | Required | Notes |
+|----------|----------|--------|
+| `BOT_TOKEN` | yes | From [@BotFather](https://t.me/BotFather) |
+| `API_ID` | yes | [my.telegram.org](https://my.telegram.org) → API development tools |
+| `API_HASH` | yes | same as above |
+| `MAX_FILE_MB` | no | default `2000` |
+| `OWNER_ID` | no | your Telegram user id |
+| `WORKERS` | no | concurrent downloads (default `2`) |
 
 ### 4. Run
 
@@ -64,24 +91,59 @@ Get a token from [@BotFather](https://t.me/BotFather).
 python bot.py
 ```
 
-Open Telegram, start a chat with your bot and send `/start`.
+Open Telegram → `/start` → paste one or more episode links.
+
+## Google Colab
+
+```python
+# 1) system deps
+!apt-get update -qq && apt-get install -y -qq ffmpeg aria2 curl
+# optional deno
+!command -v deno >/dev/null || (curl -fsSL https://deno.land/install.sh | sh)
+import os
+os.environ["PATH"] = os.path.expanduser("~/.deno/bin") + os.pathsep + os.environ.get("PATH", "")
+
+# 2) clone + pip
+%cd /content
+!rm -rf Hstream-TG
+!git clone --depth 1 https://github.com/zenin-373/Hstream-TG.git
+%cd Hstream-TG
+!pip install -q -r requirements.txt
+
+# 3) .env  (fill these)
+from pathlib import Path
+Path(".env").write_text("""
+BOT_TOKEN=your_bot_token
+API_ID=12345678
+API_HASH=your_api_hash
+MAX_FILE_MB=2000
+DOWNLOAD_ROOT=downloads
+COOKIES_DIR=user_cookies
+KEEP_FILES=false
+WORKERS=2
+SESSION_NAME=hstream_tg
+""".strip() + "\n")
+
+# 4) run (keep cell running)
+!python -u bot.py
+```
 
 ## Docker
 
 ```bash
-# Build
 docker build -t hstream-tg .
 
-# Run (mount a volume so downloads survive)
 docker run -d \
   --name hstream-tg \
-  -e BOT_TOKEN=your_token_here \
+  -e BOT_TOKEN=your_token \
+  -e API_ID=your_api_id \
+  -e API_HASH=your_api_hash \
   -v $(pwd)/downloads:/app/downloads \
   -v $(pwd)/user_cookies:/app/user_cookies \
   hstream-tg
 ```
 
-Or with a `.env` file:
+Or:
 
 ```bash
 docker run -d --name hstream-tg --env-file .env \
@@ -92,22 +154,22 @@ docker run -d --name hstream-tg --env-file .env \
 
 ## Bot commands
 
-| Command     | Description                                      |
-|-------------|--------------------------------------------------|
-| `/start`    | Welcome + short guide                            |
-| `/help`     | Detailed usage                                   |
-| `/cookies`  | Tell the bot you are about to upload cookies.txt |
-| `/status`   | Your files, size, active jobs, cookies status    |
-| `/clear`    | Delete all temporary files for your account      |
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome + short guide |
+| `/help` | Detailed usage |
+| `/cookies` | Then upload Netscape `cookies.txt` |
+| `/status` | Files, size, active jobs, cookies |
+| `/clear` | Delete your temporary files |
 
-Just paste episode URLs in a normal message (one or many).
+Paste episode URLs in a normal message (one or many). Same series → one poster; different series → new poster each.
 
 ## Cookies (restricted titles)
 
 1. Log in on hstream.moe in your browser.
-2. Export cookies with any “Get cookies.txt” extension (Netscape format).
-3. In the bot: `/cookies` → send the `.txt` file as a document.
-4. The file is stored only for your Telegram user ID.
+2. Export cookies (Netscape format) with a cookies.txt extension.
+3. In the bot: `/cookies` → send the `.txt` as a document.
+4. Stored only for your Telegram user id.
 
 Never commit real cookies.
 
@@ -115,29 +177,33 @@ Never commit real cookies.
 
 See `.env.example`:
 
-| Variable        | Default          | Meaning                              |
-|-----------------|------------------|--------------------------------------|
-| `BOT_TOKEN`     | *required*       | From @BotFather                      |
-| `OWNER_ID`      | `0`              | Your Telegram ID (optional)          |
-| `MAX_FILE_MB`   | `49`             | Max size to try sending via Telegram |
-| `DOWNLOAD_ROOT` | `downloads`      | Where videos are stored              |
-| `COOKIES_DIR`   | `user_cookies`   | Per-user cookies                     |
-| `KEEP_FILES`    | `false`          | Keep files after sending             |
-| `WORKERS`       | `2`              | Concurrent download threads          |
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `BOT_TOKEN` | *required* | From @BotFather |
+| `API_ID` | *required* | my.telegram.org |
+| `API_HASH` | *required* | my.telegram.org |
+| `OWNER_ID` | `0` | Your Telegram id (optional) |
+| `MAX_FILE_MB` | `2000` | Soft max upload size (MB) |
+| `DOWNLOAD_ROOT` | `downloads` | Download directory |
+| `COOKIES_DIR` | `user_cookies` | Per-user cookies |
+| `KEEP_FILES` | `false` | Keep files after send |
+| `WORKERS` | `2` | Concurrent download threads |
+| `SESSION_NAME` | `hstream_tg` | wzgram session name |
 
 ## Architecture
 
 ```
-bot.py          ← Telegram handlers + progress UI (async)
-extractor.py    ← pure download / subtitle / remux logic (sync, thread-safe)
+bot.py          ← wzgram (Pyrogram) handlers, series grouping, upload
+extractor.py    ← download / subtitle resolve / remux (sync, thread-safe)
 ```
 
-Heavy work (`process_url`) runs inside a `ThreadPoolExecutor` so the event loop stays free.
+Heavy work runs in a `ThreadPoolExecutor` so the event loop stays free.
 
 ## Credits
 
+- MTProto client: [wzgram](https://github.com/rjriajul/wzgram) (Pyrogram-compatible)
 - Site extraction: [hanime-plugin](https://github.com/cynthia2006/hanime-plugin) by cynthia2006
-- Original CLI tool: [Hstream-Extractor](https://github.com/zenin-373/Hstream-Extractor)
+- Original CLI: [Hstream-Extractor](https://github.com/zenin-373/Hstream-Extractor)
 
 ## License
 
