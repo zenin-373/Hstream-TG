@@ -60,16 +60,17 @@ jobs:
       - name: Login Heroku CLI
         env:
           HEROKU_API_KEY: ${{ inputs.heroku_api_key }}
+          HEROKU_EMAIL: ${{ inputs.heroku_email }}
         run: |
           set -euo pipefail
-          cat > ~/.netrc <<EOF
-machine api.heroku.com
-  login ${{ inputs.heroku_email }}
-  password ${{ inputs.heroku_api_key }}
-machine git.heroku.com
-  login ${{ inputs.heroku_email }}
-  password ${{ inputs.heroku_api_key }}
-EOF
+          {
+            echo "machine api.heroku.com"
+            echo "  login ${HEROKU_EMAIL}"
+            echo "  password ${HEROKU_API_KEY}"
+            echo "machine git.heroku.com"
+            echo "  login ${HEROKU_EMAIL}"
+            echo "  password ${HEROKU_API_KEY}"
+          } > ~/.netrc
           chmod 600 ~/.netrc
           heroku auth:whoami
 
@@ -95,20 +96,26 @@ EOF
         env:
           HEROKU_API_KEY: ${{ inputs.heroku_api_key }}
           APP: ${{ inputs.heroku_app_name }}
+          BOT_TOKEN: ${{ inputs.bot_token }}
+          OWNER_ID: ${{ inputs.owner_id }}
+          API_ID: ${{ inputs.api_id }}
+          API_HASH: ${{ inputs.api_hash }}
+          UPLOAD_CHANNEL: ${{ inputs.upload_channel }}
+          DUMP_CHANNEL: ${{ inputs.dump_channel }}
         run: |
           set -euo pipefail
           heroku config:set \
-            BOT_TOKEN="${{ inputs.bot_token }}" \
-            OWNER_ID="${{ inputs.owner_id }}" \
-            API_ID="${{ inputs.api_id }}" \
-            API_HASH="${{ inputs.api_hash }}" \
+            BOT_TOKEN="$BOT_TOKEN" \
+            OWNER_ID="$OWNER_ID" \
+            API_ID="$API_ID" \
+            API_HASH="$API_HASH" \
             --app "$APP"
 
-          if [ -n "${{ inputs.upload_channel }}" ]; then
-            heroku config:set UPLOAD_CHANNEL="${{ inputs.upload_channel }}" --app "$APP"
+          if [ -n "${UPLOAD_CHANNEL}" ]; then
+            heroku config:set UPLOAD_CHANNEL="$UPLOAD_CHANNEL" --app "$APP"
           fi
-          if [ -n "${{ inputs.dump_channel }}" ]; then
-            heroku config:set DUMP_CHANNEL="${{ inputs.dump_channel }}" --app "$APP"
+          if [ -n "${DUMP_CHANNEL}" ]; then
+            heroku config:set DUMP_CHANNEL="$DUMP_CHANNEL" --app "$APP"
           fi
 
           heroku config --app "$APP" | sed 's/=.*/=***/' || true
@@ -119,7 +126,7 @@ EOF
         run: |
           echo "$HEROKU_API_KEY" | docker login --username=_ --password-stdin registry.heroku.com
 
-      - name: Build & push worker image
+      - name: Build and push worker image
         env:
           HEROKU_API_KEY: ${{ inputs.heroku_api_key }}
           APP: ${{ inputs.heroku_app_name }}
@@ -136,7 +143,7 @@ EOF
           set -euo pipefail
           heroku container:release worker --app "$APP"
           heroku ps:scale worker=1 --app "$APP"
-          echo "—— Releases ——"
+          echo "--- Releases ---"
           heroku releases --app "$APP" | head -5
-          echo "—— Dynos ——"
+          echo "--- Dynos ---"
           heroku ps --app "$APP"
