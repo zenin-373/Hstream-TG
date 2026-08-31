@@ -186,13 +186,8 @@ def rename_episode_file(final_path: Path, anime_title: str, ep_num: str) -> Path
 
 
 def build_episode_caption(anime_title: str, ep_num: str, final_path: Path, has_subs: bool) -> str:
-    title = anime_title or "Unknown"
-    return (
-        f"<b>{html_escape(title)}</b>\n"
-        f"Episode <code>{html_escape(ep_num)}</code>\n"
-        f"💾 {human_size(final_path.stat().st_size)}"
-        + (" · Eng subs" if has_subs else "")
-    )
+    # Caption = filename only (e.g. Ane to Boin - 1.mkv)
+    return html_escape(final_path.name)
 
 
 def parse_chat_id(raw: Optional[str]):
