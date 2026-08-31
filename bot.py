@@ -104,11 +104,13 @@ def human_size(num: float) -> str:
 
 
 def html_escape(s: str) -> str:
+    # Built without literal entities so deploys survive HTML-decode of source
+    amp, lt, gt, quot = "&" + "amp;", "&" + "lt;", "&" + "gt;", "&" + "quot;"
     return (
-        s.replace("&", "&")
-        .replace("<", "<")
-        .replace(">", ">")
-        .replace('"', """)
+        s.replace("&", amp)
+        .replace("<", lt)
+        .replace(">", gt)
+        .replace('"', quot)
     )
 
 
