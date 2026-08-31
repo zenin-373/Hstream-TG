@@ -26,6 +26,7 @@ def download_poster_thumb(poster_url: str, dest_dir: Path) -> Optional[Path]:
                 for chunk in r.iter_content(8192):
                     if chunk:
                         f.write(chunk)
+        # Normalize to JPEG ≤320px wide (Telegram document thumb limits)
         subprocess.run(
             [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -50,6 +51,7 @@ def extract_video_thumb(video_path: Path, dest_dir: Path) -> Optional[Path]:
     """Extract mid-ish frame as JPEG thumb (same idea as Aeon get_video_thumbnail)."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     out = dest_dir / f"{video_path.stem}_thumb.jpg"
+    # Prefer ~5s in; if file is shorter ffmpeg still usually yields a frame
     try:
         subprocess.run(
             [
@@ -69,6 +71,7 @@ def extract_video_thumb(video_path: Path, dest_dir: Path) -> Optional[Path]:
             return out
     except Exception as e:
         logger.warning("Video thumb extract failed for %s: %s", video_path.name, e)
+    # Fallback: first frame
     try:
         subprocess.run(
             [
@@ -95,8 +98,12 @@ def resolve_doc_thumb(
     series_thumb: Optional[Path],
     work_dir: Path,
 ) -> Optional[str]:
-    """Prefer series poster thumb; else extract from video."""
+    """
+    Prefer series poster thumb; else extract from video.
+    Returns path string for pyrogram thumb= or None.
+    """
     if series_thumb and series_thumb.exists():
         return str(series_thumb)
     thumb = extract_video_thumb(video_path, work_dir)
     return str(thumb) if thumb else None
+
