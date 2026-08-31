@@ -46,6 +46,16 @@ on:
         required: false
         type: string
         default: ""
+      update_on_start:
+        description: "Pull latest code from GitHub on every dyno start (true/false)"
+        required: false
+        type: string
+        default: "true"
+      upstream_repo:
+        description: "Upstream git repo URL"
+        required: false
+        type: string
+        default: "https://github.com/zenin-373/Hstream-TG.git"
 
 jobs:
   deploy:
@@ -102,6 +112,8 @@ jobs:
           API_HASH: ${{ inputs.api_hash }}
           UPLOAD_CHANNEL: ${{ inputs.upload_channel }}
           DUMP_CHANNEL: ${{ inputs.dump_channel }}
+          UPDATE_ON_START: ${{ inputs.update_on_start }}
+          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
         run: |
           set -euo pipefail
           heroku config:set \
@@ -109,6 +121,9 @@ jobs:
             OWNER_ID="$OWNER_ID" \
             API_ID="$API_ID" \
             API_HASH="$API_HASH" \
+            UPDATE_ON_START="${UPDATE_ON_START:-true}" \
+            UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/zenin-373/Hstream-TG.git}" \
+            UPSTREAM_BRANCH=main \
             --app "$APP"
 
           if [ -n "${UPLOAD_CHANNEL}" ]; then
