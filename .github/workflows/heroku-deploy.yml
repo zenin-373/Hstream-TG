@@ -1,0 +1,41 @@
+name: Deploy to Heroku
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # manual run from Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+
+      - name: Login to Heroku Container Registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "$HEROKU_API_KEY" | docker login --username=_ --password-stdin registry.heroku.com
+
+      - name: Build & push worker image
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          APP: ${{ secrets.HEROKU_APP_NAME }}
+        run: |
+          set -euo pipefail
+          docker build -t "registry.heroku.com/${APP}/worker" .
+          docker push "registry.heroku.com/${APP}/worker"
+
+      - name: Release worker dyno
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          APP: ${{ secrets.HEROKU_APP_NAME }}
+        run: |
+          set -euo pipefail
+          heroku container:release worker --app "$APP"
+          heroku ps:scale worker=1 --app "$APP"
+          heroku releases --app "$APP" | head -5
