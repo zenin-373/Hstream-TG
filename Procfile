@@ -1,1 +1,1 @@
-worker: python -u bot.py
+worker: ./start.sh
