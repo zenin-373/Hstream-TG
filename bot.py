@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Optional
@@ -85,6 +86,12 @@ def user_dir(user_id: int) -> Path:
 
 def user_cookies_path(user_id: int) -> Path:
     return COOKIES_DIR / f"{user_id}.txt"
+
+
+def progress_bar(pct: float, width: int = 10) -> str:
+    pct = max(0.0, min(100.0, pct))
+    filled = int(round(width * pct / 100.0))
+    return "●" * filled + "○" * (width - filled)
 
 
 def human_size(num: float) -> str:
@@ -186,7 +193,6 @@ def rename_episode_file(final_path: Path, anime_title: str, ep_num: str) -> Path
 
 
 def build_episode_caption(anime_title: str, ep_num: str, final_path: Path, has_subs: bool) -> str:
-    # Caption = filename only (e.g. Ane to Boin - 1.mkv)
     return html_escape(final_path.name)
 
 
@@ -233,7 +239,13 @@ async def send_photo_no_reply(client: Client, chat_id, photo: str, caption: str 
 
 
 async def send_document_no_reply(
-    client: Client, chat_id, document: str, file_name: str, caption: str, thumb: Optional[str] = None,
+    client: Client,
+    chat_id,
+    document: str,
+    file_name: str,
+    caption: str,
+    thumb: Optional[str] = None,
+    progress=None,
 ) -> None:
     kwargs = dict(
         chat_id=chat_id,
@@ -244,6 +256,8 @@ async def send_document_no_reply(
     )
     if thumb:
         kwargs["thumb"] = thumb
+    if progress is not None:
+        kwargs["progress"] = progress
     try:
         await client.send_document(**kwargs)
     except FloodWait as e:
@@ -251,7 +265,11 @@ async def send_document_no_reply(
         await client.send_document(**kwargs)
     except Exception:
         kwargs.pop("thumb", None)
-        await client.send_document(**kwargs)
+        try:
+            await client.send_document(**kwargs)
+        except Exception:
+            kwargs.pop("progress", None)
+            await client.send_document(**kwargs)
 
 
 def media_destinations(fallback_chat_id: int) -> list:
@@ -500,9 +518,40 @@ async def process_urls(client: Client, message: Message, urls: list[str]) -> Non
 
             uploaded_ok = False
             for chat_id in dest_chats:
+                last_up = [0.0]
+
+                async def upload_progress(
+                    current: int,
+                    total: int,
+                    _idx=idx,
+                    _total=total_eps,
+                    _name=final_path.name,
+                ):
+                    now = time.time()
+                    if total and now - last_up[0] < 1.2 and current < total:
+                        return
+                    last_up[0] = now
+                    pct = (100.0 * current / total) if total else 0.0
+                    bar = progress_bar(pct)
+                    text = (
+                        f"📤 <b>[{_idx}/{_total}] Upload</b>\n"
+                        f"<code>{html_escape(_name)}</code>\n"
+                        f"{bar} <b>{pct:.1f}%</b>\n"
+                        f"Sent: {human_size(current)}\n"
+                        f"Size: {human_size(total) if total else '—'}\n"
+                        f"<i>{sys_stats_line()}</i>"
+                    )
+                    await progress_edit(status, text)
+
                 try:
                     await send_document_no_reply(
-                        client, chat_id, str(final_path), final_path.name, ep_caption, thumb_path,
+                        client,
+                        chat_id,
+                        str(final_path),
+                        final_path.name,
+                        ep_caption,
+                        thumb_path,
+                        progress=upload_progress,
                     )
                     uploaded_ok = True
                 except Exception as e:
