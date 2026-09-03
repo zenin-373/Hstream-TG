@@ -213,7 +213,12 @@ def parse_chat_id(raw: Optional[str]):
 UPLOAD_CHAT = parse_chat_id(UPLOAD_CHANNEL)
 DUMP_CHAT = parse_chat_id(DUMP_CHANNEL)
 
-from thumb_utils import download_poster_thumb, extract_video_thumb, resolve_doc_thumb
+from thumb_utils import (
+    create_user_thumb,
+    download_poster_thumb,
+    resolve_doc_thumb,
+    user_thumb_path,
+)
 
 
 async def progress_edit(status: Message, text: str) -> None:
@@ -294,6 +299,7 @@ async def start_cmd(client: Client, message: Message) -> None:
         "/start – this message\n"
         "/help – detailed help\n"
         "/cookies – upload cookies.txt\n"
+        "/thumb – set custom leech thumbnail (Aeon style)\n"
         "/status – jobs & disk usage\n"
         "/clear – delete your temporary files\n\n"
         "⚠️ Only <b>single-episode</b> URLs\n"
@@ -306,9 +312,10 @@ async def start_cmd(client: Client, message: Message) -> None:
 async def help_cmd(client: Client, message: Message) -> None:
     text = (
         "<b>How to use</b>\n\n"
-        "1. (Optional) <code>/cookies</code> then send Netscape cookies.txt\n\n"
-        "2. Paste one or more episode URLs.\n"
-        "3. Large files upload via <b>wzgram MTProto</b> "
+        "1. (Optional) <code>/cookies</code> then send Netscape cookies.txt\n"
+        "2. (Optional) <code>/thumb</code> then send a photo for custom leech thumb\n"
+        "3. Paste one or more episode URLs.\n"
+        "4. Large files upload via <b>wzgram MTProto</b> "
         f"(soft limit <code>{MAX_FILE_MB:.0f} MB</code>).\n"
     )
     await message.reply(text, parse_mode=enums.ParseMode.HTML)
@@ -326,6 +333,7 @@ async def status_cmd(client: Client, message: Message) -> None:
         f"💾 Size: <b>{human_size(total)}</b>\n"
         f"⚙️ Active jobs: <b>{len(active_jobs)}</b>\n"
         f"🍪 Cookies: {'✅' if user_cookies_path(uid).exists() else '❌'}\n"
+        f"🖼 Thumb: {'✅' if user_thumb_path(uid).exists() else '❌'}\n"
         f"📦 Max upload: <b>{MAX_FILE_MB:.0f} MB</b>\n"
     )
     await message.reply(text, parse_mode=enums.ParseMode.HTML)
@@ -358,6 +366,45 @@ async def cookies_cmd(client: Client, message: Message) -> None:
     (COOKIES_DIR / f".await_{message.from_user.id}").touch()
 
 
+@app.on_message(filters.command("thumb"))
+async def thumb_cmd(client: Client, message: Message) -> None:
+    uid = message.from_user.id
+    path = user_thumb_path(uid)
+    if message.reply_to_message and message.reply_to_message.photo:
+        dl = await message.reply_to_message.download()
+        out = create_user_thumb(Path(dl), uid)
+        Path(dl).unlink(missing_ok=True)
+        if out:
+            await message.reply("✅ Custom thumbnail saved (used for all uploads).")
+        else:
+            await message.reply("❌ Failed to save thumbnail (need ffmpeg).")
+        return
+    (COOKIES_DIR / f".await_thumb_{uid}").touch()
+    extra = "\nCurrent: ✅ set" if path.exists() else "\nCurrent: ❌ none"
+    await message.reply(
+        "🖼 Send a <b>photo</b> now to set your leech thumbnail."
+        f"{extra}\n"
+        "Same idea as Aeon <code>/settings → thumbnail</code>.",
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@app.on_message(filters.photo)
+async def handle_photo(client: Client, message: Message) -> None:
+    uid = message.from_user.id
+    flag = COOKIES_DIR / f".await_thumb_{uid}"
+    if not flag.exists():
+        return
+    dl = await message.download()
+    out = create_user_thumb(Path(dl), uid)
+    Path(dl).unlink(missing_ok=True)
+    flag.unlink(missing_ok=True)
+    if out:
+        await message.reply("✅ Custom thumbnail saved.")
+    else:
+        await message.reply("❌ Failed to save thumbnail.")
+
+
 @app.on_message(filters.document)
 async def handle_document(client: Client, message: Message) -> None:
     uid = message.from_user.id
@@ -375,7 +422,7 @@ async def handle_document(client: Client, message: Message) -> None:
     await message.reply(f"✅ Cookies saved ({human_size(dest.stat().st_size)}).")
 
 
-@app.on_message(filters.text & ~filters.command(["start", "help", "status", "clear", "cookies"]))
+@app.on_message(filters.text & ~filters.command(["start", "help", "status", "clear", "cookies", "thumb"]))
 async def handle_text(client: Client, message: Message) -> None:
     text = (message.text or "").strip()
     urls = URL_RE.findall(text)
@@ -513,7 +560,9 @@ async def process_urls(client: Client, message: Message, urls: list[str]) -> Non
 
             thumb_path = await loop.run_in_executor(
                 executor,
-                lambda: resolve_doc_thumb(final_path, series_thumb, series_thumb_dir),
+                lambda: resolve_doc_thumb(
+                    final_path, uid, series_thumb, series_thumb_dir
+                ),
             )
 
             uploaded_ok = False
