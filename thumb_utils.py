@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Aeon-style leech thumbnails for HStream-TG.
 
-Priority (same idea as Aeon TelegramUploader):
+Priority (Aeon TelegramUploader / leech):
   1. User custom thumb  →  thumbnails/{user_id}.jpg  (/thumb)
-  2. Mid-video frame    →  ffmpeg scale 640 (Aeon get_video_thumbnail)
-  3. Series poster      →  downloaded cover
+  2. Mid-video frame    →  ffmpeg scale 640
+
+Series poster is ONLY used for the separate photo post, never as file thumb.
 """
 from __future__ import annotations
 
@@ -71,6 +72,7 @@ def create_user_thumb(photo_path: Path, user_id: int) -> Optional[Path]:
 
 
 def download_poster_thumb(poster_url: str, dest_dir: Path) -> Optional[Path]:
+    """Poster for the series photo post only (not document thumb)."""
     if not poster_url:
         return None
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -206,16 +208,17 @@ def resolve_doc_thumb(
     series_thumb: Optional[Path] = None,
     work_dir: Optional[Path] = None,
 ) -> Optional[str]:
-    """user custom → mid-video frame → series poster."""
+    """Aeon leech: user custom → mid-video frame. Never series poster."""
     ut = user_thumb_path(user_id)
     if ut.exists() and ut.stat().st_size > 0:
+        logger.info("thumb: user custom %s", ut)
         return str(ut)
 
     work = work_dir or video_path.parent
     vthumb = extract_video_thumb(video_path, work)
     if vthumb:
+        logger.info("thumb: video frame %s", vthumb)
         return str(vthumb)
 
-    if series_thumb and series_thumb.exists():
-        return str(series_thumb)
+    logger.warning("thumb: none (no user thumb / video frame failed)")
     return None
