@@ -82,13 +82,48 @@ def _progress_bar(pct: float, width: int = 10) -> str:
     return "●" * filled + "○" * (width - filled)
 
 
+def _probe_video(path: Path) -> str:
+    """Return a short human string of resolution + codec (best-effort)."""
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,codec_name",
+                "-of", "csv=p=0:s=x",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            # e.g. "2560x1920xav1" or "2560x1920"
+            parts = out.stdout.strip().split("x")
+            if len(parts) >= 2:
+                w, h = parts[0], parts[1]
+                codec = parts[2] if len(parts) > 2 else "?"
+                return f"{w}×{h} ({codec})"
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def download_video(
     url: str,
     dest: Path,
     cookies_file: Optional[Path] = None,
     progress: Optional[ProgressCallback] = None,
 ) -> Path:
-    """Download with yt-dlp Python API + live progress callbacks."""
+    """Download with yt-dlp Python API + live progress callbacks.
+
+    Format preference (highest first):
+      1. 4K / 2160p-class (or ≥1920) video + best audio
+      2. ≥1440p video + best audio
+      3. best overall (yt-dlp ranking)
+      4. soft height-capped fallbacks only if the above fail
+    """
     def log(msg: str) -> None:
         if progress:
             progress(msg)
@@ -101,16 +136,28 @@ def download_video(
         raise RuntimeError("yt-dlp is required") from e
 
     output_template = str(dest / "%(title)s.%(ext)s")
+
+    # Prefer highest available quality. 4K (height≥2160) first if the source has it,
+    # then 1920p-class, 1440p-class, then unrestricted "best".
+    # Only fall back to explicit height caps when higher selectors fail.
     format_tries = [
+        # Highest first – will pick true 4K / 2160p if present
+        "bestvideo[height>=2160]+bestaudio/bestvideo[height>=1920]+bestaudio/bestvideo[height>=1440]+bestaudio/bestvideo*+bestaudio/best",
+        # Prefer AV1 when available at high res
+        "bestvideo[vcodec^=av01][height>=1440]+bestaudio/bestvideo[height>=1440]+bestaudio/best",
+        # Unrestricted best (yt-dlp ranking)
         "best",
         "bestvideo*+bestaudio/best",
+        # Soft fallbacks only if everything above fails
         "best[height<=2160]",
+        "best[height<=1440]",
         "best[height<=1080]",
         "best[height<=720]",
     ]
 
     last_update = [0.0]
     last_filename = [""]
+    chosen_fmt = [""]
 
     def hook(d: dict) -> None:
         if not progress:
@@ -139,6 +186,7 @@ def download_video(
                 f"Size: {_human_bytes(total) if total else '—'}\n"
                 f"Speed: {_human_bytes(speed)}/s\n"
                 f"ETA: {eta_s}\n"
+                f"Format: <code>{chosen_fmt[0] or '…'}</code>\n"
                 f"Tool: yt-dlp"
             )
         elif status == "finished":
@@ -150,6 +198,7 @@ def download_video(
     log(f"Downloading: {url}")
 
     for fmt in format_tries:
+        chosen_fmt[0] = fmt
         ydl_opts = {
             "format": fmt,
             "outtmpl": output_template,
@@ -189,7 +238,13 @@ def download_video(
     ]
     if not files:
         raise FileNotFoundError("No video file was produced by yt-dlp.")
-    return max(files, key=lambda p: p.stat().st_ctime)
+    video = max(files, key=lambda p: p.stat().st_ctime)
+
+    # Log actual quality so we can see what was selected
+    quality = _probe_video(video)
+    size = _human_bytes(video.stat().st_size)
+    log(f"✅ Got: <code>{video.name}</code>\nQuality: <b>{quality}</b> · {size}")
+    return video
 
 
 def download_subtitle(sub_url: str, sub_path: Path) -> bool:
